@@ -67,6 +67,40 @@ export async function sendMessage(to: string, text: string) {
     )
 };
 
+export const askAI = async (question: string, docroom?: string) => {
+  try {
+    console.log("making request to GPT");   
+    const response :any = await axios       .post(
+      "https://api.openai.com/v1/chat/completions",
+      {
+        model: "gpt-4o-mini",
+        messages: [
+          {
+            role: "system",
+            content: `You are Graice AI helping inside docroom: ${docroom || "General"}`,
+          },
+          { role: "user", content: question },
+        ],
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+    console.log("response from GPT",response);
+    
+    return response?.data?.choices[0]?.message?.content;
+  } catch (err: any) {
+    console.error("AI Error:", err.message);
+    if (err.response?.status === 429) {
+      return "Rate limit reached. Please try again in a moment.";
+    }
+    return "Sorry, AI is currently unavailable.";
+  }
+};
+
 export const getTimeStamps = () => {
     return new Date().toISOString();
 };

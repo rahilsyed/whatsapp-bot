@@ -2,9 +2,6 @@ import { sendInteractiveButtons, sendMessage } from "../helpers/utils";
 import { errorResponse, successResponse } from "../logging/api-responses";
 import { Request, Response } from "express";
 import User from "../models/User";
-import Docroom from "../models/Docroom";
-const WA_TOKEN = "EAAoZAui5YPmABQtTh4V9lDX9DlkoHUMD5dWGZCqLUfKLoZArnuKKkCh4jeD5CK4DLCrxfQuCif2XDIo9JETYipfT78kRCdptDgjq4tF2xVoyg0agB0ASiGrUZBotenrmMrAE5flAhKvYHMNUVpB2NYmn0hDfVZBM0x7wmyFndgNe18kWXm2xeCOJsP1lcWgip9Jr3VIQtRpW2BdDTH8QPVqBKVjwM6HZCOpDmQWweXptxHf4h3utOgBAZDZD";
-const PHONE_ID = 993638643831659;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 const BASE_URL = process.env.BASE_URL;
 
@@ -20,7 +17,7 @@ export const getWebHooks = async (req: Request, res: Response) => {
         const challenge = req.query["hub.challenge"];
 
         if (mode === "subscribe" && token === VERIFY_TOKEN) {
-            console.log("✅ Webhook verified");
+            console.log("Webhook verified");
             return res.status(200).send(challenge);
         }
 
@@ -36,7 +33,7 @@ export const getWebHooks = async (req: Request, res: Response) => {
 
 export const postWebHooks = async (req: Request, res: Response) => {
     try {
-        console.log("reqq",req.header);
+        
         console.log("reqq2",req.headers);
         const msg = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
         if (!msg) return res.sendStatus(200);
@@ -66,6 +63,18 @@ export const postWebHooks = async (req: Request, res: Response) => {
         console.log('whatsappLinks[phone]', whatsappLinks[phone]);
 
         if (session.state === "DOCROOM") {
+                        
+            if (text.toLowerCase() === "logout") {
+                delete whatsappLinks[phone];
+                delete sessions[phone];
+
+                const link = `${BASE_URL}/wa-link?phone=${phone}`;
+                await sendMessage(
+                    phone,
+                    `You have been logged out.\n\nPlease login again:\n${link}`
+                );
+                return res.sendStatus(200);
+            }
             const buttonReply = msg.interactive?.button_reply?.id;
             const listReply = msg.interactive?.list_reply?.id;
             const selectedId = buttonReply || listReply;
