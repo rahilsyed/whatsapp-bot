@@ -24,7 +24,7 @@ export async function sendInteractiveButtons(to: string, bodyText: string, butto
     );
 }
 
-export async function sendInteractiveList(to: string, bodyText: string, buttonText: string, sections: string) {
+export async function sendInteractiveList(to: string, bodyText: string, buttonText: string, sections: any) {
     await axios.post(
         `https://graph.facebook.com/v18.0/${process.env.PHONE_ID}/messages`,
         {
@@ -49,9 +49,32 @@ export async function sendInteractiveList(to: string, bodyText: string, buttonTe
     );
 }
 
-
-export async function sendMessage(to: string, text: string) {
-    await axios.post(
+export async function markAsRead(messageId: string) {
+  try {
+    const a= await axios.post(
+      `https://graph.facebook.com/v18.0/${process.env.PHONE_ID}/messages`,
+      {
+        messaging_product: "whatsapp",
+        status: "read",
+        message_id: messageId,
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.WA_TOKEN}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+    console.log("a is here",a);
+    
+  } catch (err:any) {
+    console.error("Mark as read failed:", err?.response?.data || err.message);
+  }
+}
+export async function sendMessage(to: string, text: string, customHeaders?: any) {
+    await sendTypingIndicator(to);
+    console.log("Custom headers:", customHeaders);
+    const x = await axios.post(
         `https://graph.facebook.com/v18.0/${process.env.PHONE_ID}/messages`,
         {
             messaging_product: "whatsapp",
@@ -62,10 +85,37 @@ export async function sendMessage(to: string, text: string) {
             headers: {
                 Authorization: `Bearer ${process.env.WA_TOKEN}`,
                 "Content-Type": "application/json",
+                ...customHeaders
             },
         }
     )
+    console.log("here is data",x);
+    
 };
+
+async function sendTypingIndicator(to: string, isTyping: boolean = true) {
+    try {
+        console.log("Sending typing indicator to:", to);
+        await axios.post(
+            `https://graph.facebook.com/v18.0/${process.env.PHONE_ID}/messages`,
+            {
+                messaging_product: "whatsapp",
+                to,
+                typing: isTyping ? "typing_on" : "typing_off",
+            },
+            {
+                headers: {
+                    Authorization: `Bearer ${process.env.WA_TOKEN}`,
+                    "Content-Type": "application/json",
+                },
+            }
+        );
+    } catch (err) {
+        console.error("Typing indicator error:", err);
+    }
+}
+
+
 
 export const askAI = async (question: string, docroom?: string) => {
   try {

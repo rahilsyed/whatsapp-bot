@@ -1,7 +1,9 @@
-import { sendInteractiveButtons, sendMessage } from "../helpers/utils";
+import { markAsRead, sendInteractiveButtons, sendInteractiveList, sendMessage } from "../helpers/utils";
 import { errorResponse, successResponse } from "../logging/api-responses";
 import { Request, Response } from "express";
 import User from "../models/User";
+import Sharepoints from "../models/Shareoints";
+
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 const BASE_URL = process.env.BASE_URL;
 
@@ -29,17 +31,17 @@ export const getWebHooks = async (req: Request, res: Response) => {
 }
 
 
-
-
 export const postWebHooks = async (req: Request, res: Response) => {
     try {
-        
-        console.log("reqq2",req.headers);
+            
         const msg = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
         if (!msg) return res.sendStatus(200);
 
         const phone = msg.from;
         const text = msg.text?.body?.trim() || "";
+        if (msg.id) {
+            await markAsRead(msg.id);
+        }
 
         let session = sessions[phone];
 
@@ -49,7 +51,8 @@ export const postWebHooks = async (req: Request, res: Response) => {
 
             await sendMessage(
                 phone,
-                `Welcome to *Graice Bot*\n\nPlease login:\n${link}`
+                `Welcome to *Graice Bot*\n\nPlease login:\n${link}`,
+                { "X-Custom": "rahil1234" }
             );
             return res.sendStatus(200);
         }
@@ -71,7 +74,8 @@ export const postWebHooks = async (req: Request, res: Response) => {
                 const link = `${BASE_URL}/wa-link?phone=${phone}`;
                 await sendMessage(
                     phone,
-                    `You have been logged out.\n\nPlease login again:\n${link}`
+                    `You have been logged out.\n\nPlease login again:\n${link}`,
+                    { "X-Custom": "value" }
                 );
                 return res.sendStatus(200);
             }
@@ -90,7 +94,7 @@ export const postWebHooks = async (req: Request, res: Response) => {
             }
 
             if (!selectedRoom) {
-                await sendMessage(phone, "Invalid choice.");
+                await sendMessage(phone, "Invalid choice.",{ "X-Custom": "value" });
                 return res.sendStatus(200);
             }
 
@@ -100,25 +104,83 @@ export const postWebHooks = async (req: Request, res: Response) => {
 
             await sendMessage(
                 phone,
-                `Entered *${session.docroomName}*\n\nAsk question.\nType *exit* to change room.`
+                `Entered *${session.docroomName}* \n Type *@* to choose connectors \n\nAsk question.\nType *exit* to change room.`
             );
 
             return res.sendStatus(200);
         }
         if (session.state === "QUERY") {
+            const listReply = msg.interactive?.list_reply?.id;
+            
+            if (listReply) {
+                const sharepoints = await Sharepoints.find();
+                const selectedSharepoint = sharepoints.find((s: any) => s._id.toString() === listReply);
+                
+                if (selectedSharepoint) {
+                    session.selectedSharepoint = selectedSharepoint._id;
+                    await sendMessage(phone, `Sharepoint *${selectedSharepoint.name}* selected`);
+                    return res.sendStatus(200);
+                }
+            }
+            
+            if (text.startsWith("@")) {
+                const query = text.slice(1).toLowerCase();
+                const sharepoints = await Sharepoints.find();
+                
+                if (query === "") {
+                    const sections = [{
+                        title: "Sharepoints",
+                        rows: sharepoints.slice(0, 10).map((s: any) => ({
+                            id: s._id.toString(),
+                            title: s.name.substring(0, 24),
+                            description: s.description?.substring(0, 72) || ""
+                        }))
+                    }];
+                    
+                    await sendInteractiveList(
+                        phone,
+                        "*Available Sharepoints:*",
+                        "Select",
+                        sections
+                    );
+                } else {
+                    const filtered = sharepoints.filter((s: any) => 
+                        s.name.toLowerCase().includes(query)
+                    );
+                    
+                    if (filtered.length > 0) {
+                        const list = filtered.map((s: any, i: number) => 
+                            `${i + 1}. ${s.name}`
+                        ).join("\n");
+                        
+                        await sendMessage(
+                            phone,
+                            `*Filtered Sharepoints:*\n\n${list}`
+                        );
+                    } else {
+                        await sendMessage(phone, "No sharepoints found.");
+                    }
+                }
+                return res.sendStatus(200);
+            }
             if (text.toLowerCase() === "exit") {
                 session.state = "DOCROOM";
 
                 const userDocrooms = session.userDocrooms || [];
-                const buttons = userDocrooms.map((d: any) => ({
-                    type: "reply",
-                    reply: { id: d._id.toString(), title: d.name },
-                }));
+                const sections = [{
+                    title: "Docrooms",
+                    rows: userDocrooms.map((d: any) => ({
+                        id: d._id.toString(),
+                        title: d.name.substring(0, 24),
+                        description: d.description?.substring(0, 72) || ""
+                    }))
+                }];
 
-                await sendInteractiveButtons(
+                await sendInteractiveList(
                     phone,
                     "*Select a Docroom:*",
-                    buttons
+                    "Select",
+                    sections
                 );
                 return res.sendStatus(200);
             }
@@ -167,15 +229,20 @@ export const linkWhatsApp = async (req: Request, res: Response) => {
             userDocrooms 
         };
 
-        const buttons = userDocrooms.map((d: any) => ({
-            type: "reply",
-            reply: { id: d._id.toString(), title: d.name },
-        }));
+        const sections = [{
+            title: "Docrooms",
+            rows: userDocrooms.map((d: any) => ({
+                id: d._id.toString(),
+                title: d.name.substring(0, 24),
+                description: d.description?.substring(0, 72) || ""
+            }))
+        }];
 
-        await sendInteractiveButtons(
+        await sendInteractiveList(
             phone,
             "*Select a Docroom:*",
-            buttons
+            "Select",
+            sections
         );
 
         res.json({ success: true });

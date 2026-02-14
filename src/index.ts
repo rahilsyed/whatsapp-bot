@@ -6,12 +6,16 @@ import apiRouter from './routes/webhooks';
 import connectToDB from './config/db';
 import './models/User';
 import './models/Docroom';
+import './models/Shareoints';
 dotenv.config();
 
 const app = express();
 connectToDB();
+app.use(cors({
+    origin: '*',
+    credentials: true
+}));
 app.use(express.json());
-app.use(cors());
 app.use(express.urlencoded({ extended: true }));
 
 app.use('/api',apiRouter);
