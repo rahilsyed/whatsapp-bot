@@ -65,7 +65,6 @@ export async function markAsRead(messageId: string) {
         },
       }
     );
-    console.log("a is here",a);
     
   } catch (err:any) {
     console.error("Mark as read failed:", err?.response?.data || err.message);
@@ -73,7 +72,6 @@ export async function markAsRead(messageId: string) {
 }
 export async function sendMessage(to: string, text: string, customHeaders?: any) {
     await sendTypingIndicator(to);
-    console.log("Custom headers:", customHeaders);
     const x = await axios.post(
         `https://graph.facebook.com/v18.0/${process.env.PHONE_ID}/messages`,
         {
@@ -89,13 +87,11 @@ export async function sendMessage(to: string, text: string, customHeaders?: any)
             },
         }
     )
-    console.log("here is data",x);
     
 };
 
 async function sendTypingIndicator(to: string, isTyping: boolean = true) {
     try {
-        console.log("Sending typing indicator to:", to);
         await axios.post(
             `https://graph.facebook.com/v18.0/${process.env.PHONE_ID}/messages`,
             {
@@ -115,42 +111,100 @@ async function sendTypingIndicator(to: string, isTyping: boolean = true) {
     }
 }
 
-
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 export const askAI = async (question: string, docroom?: string) => {
-  try {
-    console.log("making request to GPT");   
-    const response :any = await axios       .post(
-      "https://api.openai.com/v1/chat/completions",
-      {
-        model: "gpt-4o-mini",
-        messages: [
-          {
-            role: "system",
-            content: `You are Graice AI helping inside docroom: ${docroom || "General"}`,
-          },
-          { role: "user", content: question },
-        ],
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-          "Content-Type": "application/json",
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      const response: any = await axios.post(
+        "https://api.openai.com/v1/chat/completions",
+        {
+          model: "gpt-4o-mini",
+          max_tokens: 200,
+          messages: [
+            {
+              role: "system",
+              content: `You are AI helping inside docroom: ${docroom || "General"}`
+            },
+            {
+              role: "user",
+              content: question
+            }
+          ]
         },
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+            "Content-Type": "application/json"
+          }
+        }
+      );
+
+      return response?.data?.choices?.[0]?.message?.content;
+
+    } catch (err: any) {
+      if (err.response?.status === 429) {
+        const retryAfter =
+          Number(err.response.headers["retry-after"]) * 1000 ||
+          Math.pow(2, attempt) * 1000;
+
+        await sleep(retryAfter);
+        continue;
       }
-    );
-    console.log("response from GPT",response);
-    
-    return response?.data?.choices[0]?.message?.content;
-  } catch (err: any) {
-    console.error("AI Error:", err.message);
-    if (err.response?.status === 429) {
-      return "Rate limit reached. Please try again in a moment.";
+
+      console.error(err.message);
+      return "AI error";
     }
-    return "Sorry, AI is currently unavailable.";
   }
+
+  return "Rate limit exceeded. Try later.";
 };
 
 export const getTimeStamps = () => {
     return new Date().toISOString();
+};
+
+export const transcribeAudio = async (audioId: string): Promise<string> => {
+    const mediaUrl = await getMediaUrl(audioId);
+    const audioBuffer = await downloadMedia(mediaUrl);
+    
+    const FormData = require('form-data');
+    const form = new FormData();
+    form.append('file', audioBuffer, 'audio.ogg');
+    form.append('model', 'whisper-large-v3');
+    
+    const response:any = await axios.post(
+        'https://api.groq.com/openai/v1/audio/transcriptions',
+        form,
+        {
+            headers: {
+                ...form.getHeaders(),
+                Authorization: `Bearer ${process.env.GROQ_API_KEY}`
+            }
+        }
+    );
+    
+    return response?.data?.text;
+};
+
+const getMediaUrl = async (mediaId: string): Promise<string> => {
+    const response:any = await axios.get(
+        `https://graph.facebook.com/v18.0/${mediaId}`,
+        {
+            headers: {
+                Authorization: `Bearer ${process.env.WA_TOKEN}`
+            }
+        }
+    );
+    return response.data.url;
+};
+
+const downloadMedia = async (url: string): Promise<Buffer> => {
+    const response :any= await axios.get(url, {
+        headers: {
+            Authorization: `Bearer ${process.env.WA_TOKEN}`
+        },
+        responseType: 'arraybuffer'
+    });
+    return Buffer.from(response.data);
 };

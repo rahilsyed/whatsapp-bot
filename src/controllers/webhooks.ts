@@ -1,11 +1,13 @@
-import { markAsRead, sendInteractiveButtons, sendInteractiveList, sendMessage } from "../helpers/utils";
+import { askAI, markAsRead, sendInteractiveButtons, sendInteractiveList, sendMessage, transcribeAudio } from "../helpers/utils";
 import { errorResponse, successResponse } from "../logging/api-responses";
 import { Request, Response } from "express";
 import User from "../models/User";
 import Sharepoints from "../models/Shareoints";
+import jwt from 'jsonwebtoken';
 
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 const BASE_URL = process.env.BASE_URL;
+const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 
 
 const whatsappLinks: any = {};
@@ -38,7 +40,16 @@ export const postWebHooks = async (req: Request, res: Response) => {
         if (!msg) return res.sendStatus(200);
 
         const phone = msg.from;
-        const text = msg.text?.body?.trim() || "";
+        let text = msg.text?.body?.trim() || "";
+        
+        // Handle audio messages
+        if (msg.type === "audio" && msg.audio?.id) {
+            console.log("here is audio ", msg.audio);
+            res.download(msg.audio)
+            await sendMessage(phone, "🎤 Processing your audio...");
+            text = await transcribeAudio(msg.audio.id);
+            await sendMessage(phone, `📝 Transcribed: "${text}"`);
+        }
         if (msg.id) {
             await markAsRead(msg.id);
         }
@@ -63,10 +74,8 @@ export const postWebHooks = async (req: Request, res: Response) => {
             sessions[phone] = session;
         }
 
-        console.log('whatsappLinks[phone]', whatsappLinks[phone]);
-
         if (session.state === "DOCROOM") {
-                        
+
             if (text.toLowerCase() === "logout") {
                 delete whatsappLinks[phone];
                 delete sessions[phone];
@@ -94,7 +103,7 @@ export const postWebHooks = async (req: Request, res: Response) => {
             }
 
             if (!selectedRoom) {
-                await sendMessage(phone, "Invalid choice.",{ "X-Custom": "value" });
+                await sendMessage(phone, "Invalid choice.", { "X-Custom": "value" });
                 return res.sendStatus(200);
             }
 
@@ -111,22 +120,22 @@ export const postWebHooks = async (req: Request, res: Response) => {
         }
         if (session.state === "QUERY") {
             const listReply = msg.interactive?.list_reply?.id;
-            
+
             if (listReply) {
                 const sharepoints = await Sharepoints.find();
                 const selectedSharepoint = sharepoints.find((s: any) => s._id.toString() === listReply);
-                
+
                 if (selectedSharepoint) {
                     session.selectedSharepoint = selectedSharepoint._id;
                     await sendMessage(phone, `Sharepoint *${selectedSharepoint.name}* selected`);
                     return res.sendStatus(200);
                 }
             }
-            
+
             if (text.startsWith("@")) {
                 const query = text.slice(1).toLowerCase();
                 const sharepoints = await Sharepoints.find();
-                
+
                 if (query === "") {
                     const sections = [{
                         title: "Sharepoints",
@@ -136,7 +145,7 @@ export const postWebHooks = async (req: Request, res: Response) => {
                             description: s.description?.substring(0, 72) || ""
                         }))
                     }];
-                    
+
                     await sendInteractiveList(
                         phone,
                         "*Available Sharepoints:*",
@@ -144,15 +153,15 @@ export const postWebHooks = async (req: Request, res: Response) => {
                         sections
                     );
                 } else {
-                    const filtered = sharepoints.filter((s: any) => 
+                    const filtered = sharepoints.filter((s: any) =>
                         s.name.toLowerCase().includes(query)
                     );
-                    
+
                     if (filtered.length > 0) {
-                        const list = filtered.map((s: any, i: number) => 
+                        const list = filtered.map((s: any, i: number) =>
                             `${i + 1}. ${s.name}`
                         ).join("\n");
-                        
+
                         await sendMessage(
                             phone,
                             `*Filtered Sharepoints:*\n\n${list}`
@@ -186,14 +195,14 @@ export const postWebHooks = async (req: Request, res: Response) => {
             }
 
             await new Promise((r) => setTimeout(r, 1200));
+            const answer = await askAI(text, session.docroomName);
+//             const answer = `*Graice AI Response*
 
-            const answer = `*Graice AI Response*
+// Docroom: ${session.docroomName}
 
-Docroom: ${session.docroomName}
+// Q: ${text}
 
-Q: ${text}
-
-A: Apple showed solid growth from Q1 to Q2, with sales increasing from $92 billion in Q1 to $98 billion in Q2, reflecting a 6.5% improvement. The rise was mainly driven by strong iPhone sales and growth in services.`;
+// A: Apple showed solid growth from Q1 to Q2, with sales increasing from $92 billion in Q1 to $98 billion in Q2, reflecting a 6.5% improvement. The rise was mainly driven by strong iPhone sales and growth in services.`;
 
             await sendMessage(phone, answer);
             return res.sendStatus(200);
@@ -212,21 +221,27 @@ export const linkWhatsApp = async (req: Request, res: Response) => {
         const { phone, email } = req.body;
 
         let user = await User.findOne({ $or: [{ email }, { phoneNumber: phone }] }).populate('docrooms');
-        
+
         if (!user) {
             user = await User.create({ email, phoneNumber: phone, docrooms: [] });
         }
 
+        const token = jwt.sign(
+            { userId: user._id, email: user.email, phone },
+            JWT_SECRET,
+            { expiresIn: '30d' }
+        );
+
         whatsappLinks[phone] = {
             userId: user._id,
             email: user.email,
-            jwt: "fake_jwt_token",
+            jwt: token,
         };
 
         const userDocrooms = user.docrooms;
-        sessions[phone] = { 
+        sessions[phone] = {
             state: "DOCROOM",
-            userDocrooms 
+            userDocrooms
         };
 
         const sections = [{
