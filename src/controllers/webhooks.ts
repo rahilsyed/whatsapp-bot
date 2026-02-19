@@ -1,4 +1,4 @@
-import { askAI, markAsRead, sendInteractiveButtons, sendInteractiveList, sendMessage, transcribeAudio } from "../helpers/utils";
+import { askAI, markAsRead, sendInteractiveButtons, sendInteractiveList, sendMessage, transcribeAudio, downloadAudioLocally } from "../helpers/utils";
 import { errorResponse, successResponse } from "../logging/api-responses";
 import { Request, Response } from "express";
 import User from "../models/User";
@@ -12,6 +12,7 @@ const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 
 const whatsappLinks: any = {};
 const sessions: any = {};
+const processedMessages = new Set<string>();
 
 
 export const getWebHooks = async (req: Request, res: Response) => {
@@ -34,24 +35,27 @@ export const getWebHooks = async (req: Request, res: Response) => {
 
 
 export const postWebHooks = async (req: Request, res: Response) => {
+    res.sendStatus(200);
     try {
             
         const msg = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
-        if (!msg) return res.sendStatus(200);
+        if (!msg || !msg.id) return;
+
+        if (processedMessages.has(msg.id)) return;
+        processedMessages.add(msg.id);
+
+        setTimeout(() => processedMessages.delete(msg.id), 60000);
 
         const phone = msg.from;
         let text = msg.text?.body?.trim() || "";
-        
-        // Handle audio messages
+
+        await markAsRead(msg.id);
+
         if (msg.type === "audio" && msg.audio?.id) {
-            console.log("here is audio ", msg.audio);
-            res.download(msg.audio)
-            await sendMessage(phone, "🎤 Processing your audio...");
-            text = await transcribeAudio(msg.audio.id);
-            await sendMessage(phone, `📝 Transcribed: "${text}"`);
-        }
-        if (msg.id) {
-            await markAsRead(msg.id);
+            await sendMessage(phone, "Downloading your audio...");
+            const filePath = await downloadAudioLocally(msg.audio.id, phone);
+            await sendMessage(phone, `Audio saved: ${filePath}`);
+            return;
         }
 
         let session = sessions[phone];
@@ -65,7 +69,7 @@ export const postWebHooks = async (req: Request, res: Response) => {
                 `Welcome to *Graice Bot*\n\nPlease login:\n${link}`,
                 { "X-Custom": "rahil1234" }
             );
-            return res.sendStatus(200);
+            return;
         }
 
 
@@ -86,7 +90,7 @@ export const postWebHooks = async (req: Request, res: Response) => {
                     `You have been logged out.\n\nPlease login again:\n${link}`,
                     { "X-Custom": "value" }
                 );
-                return res.sendStatus(200);
+                return;
             }
             const buttonReply = msg.interactive?.button_reply?.id;
             const listReply = msg.interactive?.list_reply?.id;
@@ -103,8 +107,8 @@ export const postWebHooks = async (req: Request, res: Response) => {
             }
 
             if (!selectedRoom) {
-                await sendMessage(phone, "Invalid choice.", { "X-Custom": "value" });
-                return res.sendStatus(200);
+                await sendMessage(phone, "Invalid choice.");
+                return;
             }
 
             session.docroomId = selectedRoom._id;
@@ -115,8 +119,7 @@ export const postWebHooks = async (req: Request, res: Response) => {
                 phone,
                 `Entered *${session.docroomName}* \n Type *@* to choose connectors \n\nAsk question.\nType *exit* to change room.`
             );
-
-            return res.sendStatus(200);
+            return;
         }
         if (session.state === "QUERY") {
             const listReply = msg.interactive?.list_reply?.id;
@@ -128,7 +131,7 @@ export const postWebHooks = async (req: Request, res: Response) => {
                 if (selectedSharepoint) {
                     session.selectedSharepoint = selectedSharepoint._id;
                     await sendMessage(phone, `Sharepoint *${selectedSharepoint.name}* selected`);
-                    return res.sendStatus(200);
+                    return;
                 }
             }
 
@@ -170,7 +173,7 @@ export const postWebHooks = async (req: Request, res: Response) => {
                         await sendMessage(phone, "No sharepoints found.");
                     }
                 }
-                return res.sendStatus(200);
+                return;
             }
             if (text.toLowerCase() === "exit") {
                 session.state = "DOCROOM";
@@ -191,27 +194,25 @@ export const postWebHooks = async (req: Request, res: Response) => {
                     "Select",
                     sections
                 );
-                return res.sendStatus(200);
+                console.log("docroom list sent");
+
+                return;
             }
 
-            await new Promise((r) => setTimeout(r, 1200));
             const answer = await askAI(text, session.docroomName);
-//             const answer = `*Graice AI Response*
+            //             const answer = `*Graice AI Response*
 
-// Docroom: ${session.docroomName}
+            // Docroom: ${session.docroomName}
 
-// Q: ${text}
+            // Q: ${text}
 
-// A: Apple showed solid growth from Q1 to Q2, with sales increasing from $92 billion in Q1 to $98 billion in Q2, reflecting a 6.5% improvement. The rise was mainly driven by strong iPhone sales and growth in services.`;
+            // A: Apple showed solid growth from Q1 to Q2, with sales increasing from $92 billion in Q1 to $98 billion in Q2, reflecting a 6.5% improvement. The rise was mainly driven by strong iPhone sales and growth in services.`;
 
             await sendMessage(phone, answer);
-            return res.sendStatus(200);
+            return;
         }
-
-        res.sendStatus(200);
     } catch (err) {
         console.error(err);
-        res.sendStatus(500);
     }
 }
 

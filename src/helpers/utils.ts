@@ -71,7 +71,6 @@ export async function markAsRead(messageId: string) {
   }
 }
 export async function sendMessage(to: string, text: string, customHeaders?: any) {
-    await sendTypingIndicator(to);
     const x = await axios.post(
         `https://graph.facebook.com/v18.0/${process.env.PHONE_ID}/messages`,
         {
@@ -90,37 +89,15 @@ export async function sendMessage(to: string, text: string, customHeaders?: any)
     
 };
 
-async function sendTypingIndicator(to: string, isTyping: boolean = true) {
-    try {
-        await axios.post(
-            `https://graph.facebook.com/v18.0/${process.env.PHONE_ID}/messages`,
-            {
-                messaging_product: "whatsapp",
-                to,
-                typing: isTyping ? "typing_on" : "typing_off",
-            },
-            {
-                headers: {
-                    Authorization: `Bearer ${process.env.WA_TOKEN}`,
-                    "Content-Type": "application/json",
-                },
-            }
-        );
-    } catch (err) {
-        console.error("Typing indicator error:", err);
-    }
-}
-
-const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export const askAI = async (question: string, docroom?: string) => {
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
       const response: any = await axios.post(
-        "https://api.openai.com/v1/chat/completions",
+        "https://api.groq.com/openai/v1/chat/completions",
         {
-          model: "gpt-4o-mini",
-          max_tokens: 200,
+          model: "llama-3.1-8b-instant", // or mixtral / gemma / etc
           messages: [
             {
               role: "system",
@@ -130,38 +107,58 @@ export const askAI = async (question: string, docroom?: string) => {
               role: "user",
               content: question
             }
-          ]
+          ],
+          max_tokens: 200,
         },
         {
           headers: {
-            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+            Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
             "Content-Type": "application/json"
           }
         }
       );
 
-      return response?.data?.choices?.[0]?.message?.content;
-
+      return response?.data?.choices?.[0]?.message?.content || "No response";
     } catch (err: any) {
       if (err.response?.status === 429) {
         const retryAfter =
-          Number(err.response.headers["retry-after"]) * 1000 ||
+          Number(err.response.headers?.["retry-after"]) * 1000 ||
           Math.pow(2, attempt) * 1000;
 
         await sleep(retryAfter);
         continue;
       }
 
-      console.error(err.message);
+      console.error("Groq error:", err.response?.data || err.message);
       return "AI error";
     }
   }
 
-  return "Rate limit exceeded. Try later.";
+  return "AI failed after retries";
 };
 
 export const getTimeStamps = () => {
     return new Date().toISOString();
+};
+
+export const downloadAudioLocally = async (audioId: string, phone: string): Promise<string> => {
+    const fs = require('fs');
+    const path = require('path');
+    
+    const mediaUrl = await getMediaUrl(audioId);
+    const audioBuffer = await downloadMedia(mediaUrl);
+    
+    const audioDir = path.join(process.cwd(), 'audio_files');
+    if (!fs.existsSync(audioDir)) {
+        fs.mkdirSync(audioDir, { recursive: true });
+    }
+    
+    const timestamp = Date.now();
+    const fileName = `${phone}_${timestamp}.ogg`;
+    const filePath = path.join(audioDir, fileName);
+    
+    fs.writeFileSync(filePath, audioBuffer);
+    return filePath;
 };
 
 export const transcribeAudio = async (audioId: string): Promise<string> => {
